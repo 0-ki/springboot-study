@@ -65,7 +65,7 @@ public class SpringBootTestApplicationTests {
 - MVC 관련 설정인 ```@Controller, @ControllerAdvice, @JsonComponent, Filter, WebMvcConfigurer, HandlerMethodArgumentResolver``` 만 로드되어 가볍다.
 
 <details>
-<summary> Book 도메인 </summary>
+<summary> Book (도메인) </summary>
 <div markdown="1">
 
 ```java
@@ -94,7 +94,7 @@ public class Book {
 </details>
 
 <details>
-<summary>/books 로 GET 요청시 Controller </summary>
+<summary>Controller (/books 로 GET 요청시) </summary>
 <div markdown="1">
 
 ```java
@@ -129,13 +129,171 @@ public interface BookService {
 
 
 <details>
-<summary></summary>
+<summary>BookControllerTest (컨트롤러 테스트 코드)</summary>
 <div markdown="1">
 
+```java
+@RunWith(SpringRunner.class)
+@WebMvcTest(BookController.class) // 테스트에 사용할 클래스 명시
+public class BookControllerTest {
+
+    // 모든 의존성이 아닌 BookController 관련 Bean 만 로드. 여기서는 HTTP 서버를 대신 하려고.
+    @Autowired
+    private MockMvc mvc; 
+
+    // 구현체는 없지만 Mock(목) 가짜 객체로 쓸 것임.
+    @MockBean
+    private BookService bookService;
+
+    @Test
+    public void Book_MVC_테스트() throws Exception {
+        Book book = new Book("Spring Boot Book", LocalDateTime.now());
+        given(bookService.getBookList()).willReturn(Collections.singletonList(book));
+        //given( 어떤 메서드를 주면).willReturn( XXX가 return 될거다 )
+
+        mvc.perform(get("/books"))
+                .andExpect(status().isOk())         // HTTP status 200
+                .andExpect(view().name("book"))     // 반환 view 이름이 'book'
+                .andExpect(model().attributeExists("bookList")) // model 프로퍼티 중 'bookList' 존재하는지
+                .andExpect(model().attribute("bookList", contains(book))); // 해당 프로퍼티에 book 객체가 담겨 있는지
+    }
+}
+```
+</div>
+</details>
+---
+
+> ### 3) @DataJpaTest
+- 특징과 쓰이는 때,
+    1. JPA 관련 테스트 설정만 로드
+    2. 데이터 소스의 설정, JPA로 데이터를 생성, 수정, 삭제 정상적으로 하는지
+    3. 내장형 데이터베이스 (H2) 사용 등
+ 
+ - 기본으로 인메모리 임베디드 DB 사용
+ - ```@Entity``` 클래스를 스캔하여 JPA Repositories 구성
+<details>
+<summary>별도의 DataSource 를 사용하도록 Profile 사용</summary>
+<div markdown="1">
+
+```java
+@RunWith(SpringRunner.class)
+@DataJpaTest
+//dev 프로파일 설정값으로 사용
+@ActiveProfiles("dev")
+@AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE) 
+//.Any는 기본 내장 DataSource 사용
+//@AutoConfigureTestDatabase(connection = H2)
+public class BookJpaTest {
+    .....
+}
+```
 </div>
 </details>
 
+- ```@DataJpaTest```는 자동으로 테스트 후 Rollback
+- EntityManager 대체하여, 테스트용인 TestEntityManager 를 사용해서 persist, flush, find 등 기본 JPA 테스트가 가능하다.
+  - persist : 저장하고나서 return 없이 끝 / save 는 저장하고나서 저장된 객체를 돌려준다.
+  - flush :  DB의 상태를 맞추는 작업. 영속성 컨텍스트의 변경 내용을 DB에 동기화(반영) 한다.
+  - 궁금하면 https://velog.io/@jayjay28/%EC%97%94%ED%8B%B0%ED%8B%B0Entity
 
+
+<details>
+<summary>Book 에 JPA 설정 추가</summary>
+<div markdown="1">
+
+```java
+@NoArgsConstructor
+@Getter
+@Entity // 테이블과 매핑되어 JPA가 관리할 클래스
+@Table  // 매핑할 테이블 지정, 생략시 엔티티 네임으로 테이블 매핑
+public class Book {
+
+    @Id
+    @GeneratedValue
+    private Integer idx;
+
+    @Column
+    private String title;
+
+    @Column
+    private LocalDateTime publishedAt;
+
+    @Builder
+    public Book(String title, LocalDateTime publishedAt) {
+        this.title = title;
+        this.publishedAt = publishedAt;
+    }
+```
+</div>
+</details>
+
+<details>
+<summary>BookRepository 인터페이스 ( JPA )</summary>
+<div markdown="1">
+
+```java
+public interface BookRepository extends JpaRepository<Book, Integer> { //Integer는 PK?
+}
+```
+</div>
+</details>
+
+<details>
+<summary></summary>
+<div markdown="1">
+
+```java
+@RunWith(SpringRunner.class)
+@DataJpaTest //자동으로 Rollback
+public class BookJpaTest {
+    private final static String BOOT_TEST_TITLE = "Spring Boot Test Book";
+
+    @Autowired
+    private TestEntityManager testEntityManager; // 테스트용 EntityManager
+
+    @Autowired
+    private BookRepository bookRepository;
+
+    @Test
+    public void Book저장하기_테스트() {
+        Book book = Book.builder().title(BOOT_TEST_TITLE).publishedAt(LocalDateTime.now()).build();
+        testEntityManager.persist(book); // persist 테스트
+        assertThat(bookRepository.getOne(book.getIdx()), is(book));
+    }
+
+    // book 3개 저장하고 3개 맞는지, 각각 맞는 객체인지
+    @Test
+    public void BookList저장하고_찾기_테스트() {
+        Book book1 = Book.builder().title(BOOT_TEST_TITLE+"1").publishedAt(LocalDateTime.now()).build();
+        testEntityManager.persist(book1);
+        Book book2 = Book.builder().title(BOOT_TEST_TITLE+"2").publishedAt(LocalDateTime.now()).build();
+        testEntityManager.persist(book2);
+        Book book3 = Book.builder().title(BOOT_TEST_TITLE+"3").publishedAt(LocalDateTime.now()).build();
+        testEntityManager.persist(book3);
+
+        List<Book> bookList = bookRepository.findAll();
+        assertThat(bookList, hasSize(3));
+        assertThat(bookList, contains(book1, book2, book3));
+    }
+    
+    // 2개 잘 삭제 됐는지.
+    @Test
+    public void BookList저장하고_삭제_테스트() {
+        Book book1 = Book.builder().title(BOOT_TEST_TITLE+"1").publishedAt(LocalDateTime.now()).build();
+        testEntityManager.persist(book1);
+        Book book2 = Book.builder().title(BOOT_TEST_TITLE+"2").publishedAt(LocalDateTime.now()).build();
+        testEntityManager.persist(book2);
+
+        bookRepository.deleteAll();
+        assertThat(bookRepository.findAll(), IsEmptyCollection.empty());
+    }
+    
+    // 클래스 전체를 한 번에 테스트하면 (RUN - public class BookJpaTest), 서로 영향이 없나?
+    // 클래스 전체 테스트 시 메서드의 순서는 보장되지 않음.
+}
+```
+</div>
+</details>
 
 
 
@@ -144,6 +302,9 @@ public interface BookService {
 <summary></summary>
 <div markdown="1">
 
+```java
+
+```
 </div>
 </details>
 

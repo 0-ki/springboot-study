@@ -232,14 +232,14 @@ public class Book {
 <div markdown="1">
 
 ```java
-public interface BookRepository extends JpaRepository<Book, Integer> { //Integer는 PK?
+public interface BookRepository extends JpaRepository<Book, Integer> { //Q. Integer는 PK?
 }
 ```
 </div>
 </details>
 
 <details>
-<summary></summary>
+<summary>@DataJpaTest 테스트 코드</summary>
 <div markdown="1">
 
 ```java
@@ -288,12 +288,162 @@ public class BookJpaTest {
         assertThat(bookRepository.findAll(), IsEmptyCollection.empty());
     }
     
-    // 클래스 전체를 한 번에 테스트하면 (RUN - public class BookJpaTest), 서로 영향이 없나?
+    // Q. 클래스 전체를 한 번에 테스트하면 (RUN - public class BookJpaTest), 서로 영향이 없나?
     // 클래스 전체 테스트 시 메서드의 순서는 보장되지 않음.
+
+    // 인프런 - 김영한 강의 중
+    // @AfterEach : 한번에 여러 테스트를 실행하면 메모리 DB에 직전 테스트의 결과가 남을 수 있다. 이렇게 되면 다음 이전 테스트 때문에 다음 테스트가 실패할 가능성이 있다. @AfterEach 를 사용하면 각 테스트가 종료될 때 마다 이 기능을 실행한다. 여기서는 메모리 DB에 저장된 데이터를 삭제한다.
+
+    // 테스트는 각각 독립적으로 실행되어야 한다. 테스트 순서에 의존관계가 있는 것은 좋은 테스트가 아니다.
 }
 ```
 </div>
 </details>
+
+
+> ### 4) @RestClientTest
+- Rest 통신에서 JSON으로 잘 응답하는지 등등
+
+<details>
+<summary>BookRestController 실제 컨트롤러</summary>
+<div markdown="1">
+
+```java
+@RestController
+public class BookRestController {
+
+    @Autowired
+    private BookRestService bookRestService;
+
+    @GetMapping(path = "/rest/test", produces = MediaType.APPLICATION_JSON_VALUE)//application/json
+    public Book getRestBooks() {
+        return bookRestService.getRestBook(); //getRestBook()의 반환값은 Book인데 JSON형식 String으로 반환
+    }
+}
+```
+</div>
+</details>
+
+<details>
+<summary>BookRestService (RestTemplate 활용)</summary>
+<div markdown="1">
+
+```java
+@Service
+public class BookRestService {
+
+    private final RestTemplate restTemplate;
+    
+    // Constuctor
+    public BookRestService(RestTemplateBuilder restTemplateBuilder) {
+        this.restTemplate = restTemplateBuilder.rootUri("/rest/test").build();
+    }
+
+    public Book getRestBook() {
+        return this.restTemplate.getForObject("/rest/test", Book.class);
+    }
+}
+```
+</div>
+</details>
+
+
+<details>
+<summary>BookRestTest ( @RestClientTest )</summary>
+<div markdown="1">
+
+```java
+@RunWith(SpringRunner.class)
+@RestClientTest(BookRestService.class) // 테스트에 사용할 Bean 주입
+public class BookRestTest {
+
+    @Rule // 테스트 메서드 종료시마다 정의한 값으로 초기화
+    public ExpectedException thrown = ExpectedException.none();
+
+    @Autowired
+    private BookRestService bookRestService;
+
+    @Autowired
+    private MockRestServiceServer server; // 서버를 대신할 용도
+
+    // 요청과 응답이 같은지만 테스트
+    @Test
+    public void rest_테스트() {
+        this.server.expect(requestTo("/rest/test")) //요청 URI
+                // 응답할 JSON 값 (json 파일을 읽어서)
+                .andRespond(withSuccess(new ClassPathResource("/test.json", getClass()), MediaType.APPLICATION_JSON));
+        Book book = this.bookRestService.getRestBook();
+        assertThat(book.getTitle()).isEqualTo("테스트");
+    }
+
+/**
+* test.json
+* {"idx":null, "title":"테스트","publishedAt":null}
+*
+*/
+
+    @Test
+    public void rest_error_테스트() {
+        this.server.expect(requestTo("/rest/test"))
+                .andRespond(withServerError());
+        this.thrown.expect(HttpServerErrorException.class); // HTTP response status is 500
+        this.bookRestService.getRestBook();
+    }
+}
+```
+</div>
+</details>
+
+> ### 5) @JsonTest
+- Gson과 Jackson API 테스트 제공 ( 각각 -Tester)
+- Jackson API로 테스트
+  - `JSON data -> 객체`     or `객체 -> JSON data`
+  - 직렬화 / 역직렬화
+<details>
+<summary>BookJsonTest ( @JsonTest )</summary>
+<div markdown="1">
+
+```java
+@RunWith(SpringRunner.class)
+@JsonTest
+public class BookJsonTest {
+
+    @Autowired
+    private JacksonTester<Book> json;
+
+    @Test
+    public void json_테스트() throws Exception { // Q. 왜 여기만 throws Exception 을 붙인것인가
+        Book book = Book.builder()
+                .title("테스트")
+                .build();
+
+        String content = "{\"title\":\"테스트\"}";
+        // String을 객체로 변환 ( Q. 객체의 Type은 그냥 Java Object ? )
+        assertThat(this.json.parseObject(content).getTitle()).isEqualTo(book.getTitle());
+        assertThat(this.json.parseObject(content).getPublishedAt()).isNull();
+
+        assertThat(this.json.write(book)).isEqualToJson("/test.json");
+        assertThat(this.json.write(book)).hasJsonPathStringValue("title");
+        assertThat(this.json.write(book)).extractingJsonPathStringValue("title").isEqualTo("테스트");
+    }
+}
+```
+</div>
+</details>
+
+---
+>### 마치며
+```
+Spring의 모든 Bean을 올리지 말고, 각 테스트에 필요한 가짜 객체를 잘 활용할 것!
+```
+
+
+
+
+
+
+
+
 
 
 
